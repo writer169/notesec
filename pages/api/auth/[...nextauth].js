@@ -4,7 +4,7 @@ import GoogleProvider from 'next-auth/providers/google';
 import { MongoDBAdapter } from "@next-auth/mongodb-adapter";
 import clientPromise from '../../../lib/mongodb';
 
-export default NextAuth({
+export const authOptions = { //  <--- ДОБАВЬ ЭТУ СТРОКУ
   adapter: MongoDBAdapter(clientPromise),
   providers: [
     GoogleProvider({
@@ -33,4 +33,6 @@ export default NextAuth({
     signIn: '/',
     error: '/',
   },
-});
+};
+
+export default NextAuth(authOptions); // Оставь эту строку как есть
