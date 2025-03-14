@@ -1,6 +1,6 @@
 // --- /pages/api/notes/[id].js ---
 import { getSession } from 'next-auth/react';
-import clientPromise from '../../../../lib/mongodb'; // Правильный относительный путь
+import clientPromise from '../../../lib/mongodb'; // Правильный относительный путь
 import { ObjectId } from 'mongodb';
 
 export default async function handler(req, res) {
