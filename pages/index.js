@@ -1,21 +1,27 @@
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useRouter } from 'next/router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react'; // Import useState
 import Head from 'next/head';
 
 export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const [isMounted, setIsMounted] = useState(false); // Add isMounted state
+
+  // Prevent any rendering until mounted
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   useEffect(() => {
-    if (status === 'authenticated') { // Use status for redirection
+    if (isMounted && status === 'authenticated') {
       router.push('/notes');
     }
-  }, [session, router, status]); // Include status in dependencies
+  }, [isMounted, status, router]); // Include isMounted in dependencies
 
 
-  if (status === 'loading') {
-      return <div className="min-h-screen flex items-center justify-center bg-gray-50">Loading...</div>;
+  if (!isMounted || status === 'loading') {
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50">Loading...</div>;
   }
 
   return (
@@ -57,7 +63,6 @@ export default function Home() {
                 onClick={() => signIn('google')}
                 className="flex items-center px-4 py-2 bg-white border rounded hover:bg-gray-50 shadow"
               >
-                {/* SVG Icon (Corrected) */}
                 <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
                   <path
                     fill="#4285F4"
