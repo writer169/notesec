@@ -1,14 +1,30 @@
-// pages/index.js
-import { signIn, signOut } from 'next-auth/react';
+import { signIn, signOut, useSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { getServerSideProps } from '../lib/auth';
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "./api/auth/[...nextauth]";
 
-export default function Home({ session }) { // Получаем session из props
+export default function Home({ session }) {
   const router = useRouter();
+  // Используем useSession для дополнительной проверки на клиенте
+  const { data: clientSession, status } = useSession();
+  
+  // Используем либо серверную сессию, либо клиентскую
+  const userSession = session || clientSession;
+  
+  // Если статус загрузки, показываем индикатор загрузки
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <p>Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Если сессии нет (пользователь не залогинен), показываем кнопку входа
-  if (!session) {
+  if (!userSession) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <Head>
@@ -16,14 +32,13 @@ export default function Home({ session }) { // Получаем session из pro
           <meta name="description" content="Secure personal notes application" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </Head>
-
         <div className="max-w-md w-full p-6 bg-white rounded-lg shadow-md">
           <h1 className="text-2xl font-bold text-center mb-6">Secure Notes</h1>
           <div className="space-y-4">
             <p className="text-center">Sign in to access your secure notes</p>
             <div className="flex justify-center">
               <button
-                onClick={() => signIn('google')}
+                onClick={() => signIn('google', { callbackUrl: '/' })}
                 className="flex items-center px-4 py-2 bg-white border rounded hover:bg-gray-50 shadow"
               >
                 <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
@@ -52,9 +67,8 @@ export default function Home({ session }) { // Получаем session из pro
       </div>
     );
   }
-
-  // Если сессия есть (пользователь залогинен), показываем кнопку выхода и переход к заметкам.
-  // Теперь переход на /notes осуществляется ТОЛЬКО по нажатию кнопки, а не автоматически
+  
+  // Если сессия есть (пользователь залогинен), показываем кнопку выхода и переход к заметкам
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <Head>
@@ -65,7 +79,7 @@ export default function Home({ session }) { // Получаем session из pro
       <div className="max-w-md w-full p-6 bg-white rounded-lg shadow-md">
         <h1 className="text-2xl font-bold text-center mb-6">Secure Notes</h1>
         <div className="space-y-4">
-          <p className="text-center">Logged in as {session.user.email}</p>
+          <p className="text-center">Logged in as {userSession.user.email}</p>
           <div className="flex justify-center">
             <button
               onClick={() => router.push('/notes')}
@@ -76,7 +90,7 @@ export default function Home({ session }) { // Получаем session из pro
           </div>
           <div className="flex justify-center">
             <button
-              onClick={() => signOut()}
+              onClick={() => signOut({ callbackUrl: '/' })}
               className="px-4 py-2 border rounded hover:bg-gray-100"
             >
               Sign Out
@@ -88,5 +102,12 @@ export default function Home({ session }) { // Получаем session из pro
   );
 }
 
-// Export the getServerSideProps function (оставляем как есть)
-export { getServerSideProps }
+export async function getServerSideProps(context) {
+  const session = await getServerSession(context.req, context.res, authOptions);
+  
+  return {
+    props: {
+      session: session || null,
+    },
+  };
+}
