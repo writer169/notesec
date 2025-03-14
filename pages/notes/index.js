@@ -7,10 +7,12 @@ import NoteEditor from '../../components/NoteEditor';
 import { encrypt, decrypt, deriveKey } from '../../lib/encryption';
 import { getSession } from 'next-auth/react'; // Импортируем getSession
 import crypto from 'crypto';
-import Modal from '../../components/Modal'; // !!! Добавь этот компонент (смотри ниже)
+import Modal from '../../components/Modal';
+import clientPromise from '../../lib/mongodb'; // Импортируем clientPromise
+import { ObjectId } from 'mongodb';
 
 
-export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, initialSalt }) { // Принимаем пропсы
+export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, initialSalt, error }) { // Принимаем пропсы, включая error
   const router = useRouter();
   const [notes, setNotes] = useState(initialNotes || []); // Используем initialNotes
   const [selectedNote, setSelectedNote] = useState(null);
@@ -21,7 +23,7 @@ export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, i
   const [hasSetupKey, setHasSetupKey] = useState(initialHasSetupKey);
   const [salt, setSalt] = useState(initialSalt);  // Сохраняем соль в состоянии
   const [showMasterPasswordModal, setShowMasterPasswordModal] = useState(false);
-    const [error, setError] = useState('');
+    const [errorMessage, setErrorMessage] = useState(error || ''); // Используем пропс error и локальное состояние
 
     const fetchNotes = useCallback(async () => {
         if (!encryptionKey) {
@@ -50,7 +52,7 @@ export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, i
             setNotes(decryptedNotes);
         } catch (error) {
             console.error('Failed to fetch notes:', error);
-            alert('Не удалось загрузить заметки.');
+            setErrorMessage('Не удалось загрузить заметки.'); // Устанавливаем сообщение об ошибке
         } finally {
             setLoading(false);
         }
@@ -66,10 +68,10 @@ export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, i
   // Setup master password (called from the initial form or the modal)
     const setupEncryptionKey = async (e) => {
         e.preventDefault(); // Prevent default form submission
-         setError('');
+        setErrorMessage('');
 
         if (!masterPassword || masterPassword.length < 8) {
-            setError('Master password must be at least 8 characters long.');
+            setErrorMessage('Master password must be at least 8 characters long.');
             return;
         }
 
@@ -102,7 +104,7 @@ export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, i
 
         } catch (error) {
             console.error('Failed to setup encryption key:', error);
-            setError(error.message || 'Failed to set up encryption key.');
+          setErrorMessage(error.message || 'Failed to set up encryption key.');
         }
     };
 
@@ -147,7 +149,7 @@ export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, i
             return note;
         } catch (error) {
             console.error('Failed to fetch full note:', error);
-            alert('Не удалось загрузить полное содержимое заметки.');
+          setErrorMessage('Не удалось загрузить полное содержимое заметки.');
             return null;
         }
     };
@@ -155,7 +157,7 @@ export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, i
   // Save note
   const saveNote = async (noteData) => {
         if (!encryptionKey) {
-          alert('Encryption key is not available');
+          setErrorMessage('Encryption key is not available');
           return;
         }
 
@@ -231,7 +233,7 @@ export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, i
 
     } catch (error) {
       console.error('Failed to save note:', error);
-      alert(`Не удалось сохранить заметку: ${error.message}`);
+      setErrorMessage(`Не удалось сохранить заметку: ${error.message}`);
     }
   };
 
@@ -257,7 +259,7 @@ export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, i
       }
     } catch (error) {
       console.error('Failed to delete note:', error);
-      alert(`Не удалось удалить заметку: ${error.message}`);
+      setErrorMessage(`Не удалось удалить заметку: ${error.message}`);
     }
   };
 
@@ -298,12 +300,12 @@ export default function Notes({ initialNotes, hasSetupKey: initialHasSetupKey, i
         fetchNotes(); // Reload notes after successful import
       } catch (error) {
         console.error('Failed to import notes:', error);
-        alert(`Ошибка импорта: ${error.message}`);
+        setErrorMessage(`Ошибка импорта: ${error.message}`);
       }
     };
 
     reader.onerror = () => {
-      alert('Не удалось прочитать файл.');
+      setErrorMessage('Не удалось прочитать файл.');
     };
 
     reader.readAsText(file);
@@ -351,7 +353,7 @@ const exportNotes = async () => {
     document.body.removeChild(downloadLink);
   } catch (error) {
     console.error('Failed to export notes:', error);
-    alert('Не удалось экспортировать заметки.');
+    setErrorMessage('Не удалось экспортировать заметки.');
   }
 };
 
@@ -369,7 +371,7 @@ const exportNotes = async () => {
         <div className="p-6">
           <h2 className="text-lg font-bold mb-4">Enter Master Password</h2>
           <form onSubmit={setupEncryptionKey} className="space-y-4">
-              {error && <p className="text-red-500 text-sm">{error}</p>}
+              {errorMessage && <p className="text-red-500 text-sm">{errorMessage}</p>}
             <div>
               <input
                 type="password"
@@ -548,6 +550,12 @@ const exportNotes = async () => {
                 )}
               </div>
             </div>)}
+             {/* Error Message */}
+            {errorMessage && (
+                <div className="fixed bottom-4 right-4 bg-red-500 text-white p-4 rounded-md shadow-lg z-50">
+                <p>{errorMessage}</p>
+                </div>
+            )}
       </div>
     </div>
   );
@@ -566,9 +574,13 @@ export async function getServerSideProps(context) {
         };
     }
 
-    await dbConnect();
+  try{
+    const client = await clientPromise; // Получаем клиент MongoDB
+    const db = client.db(); // Получаем базу данных
+
     const userId = session.user.id;
-    const user = await User.findById(userId);
+    // const user = await User.findById(userId); // Заменяем на:
+      const user = await db.collection('users').findOne({_id: new ObjectId(userId)});
     let hasSetupKey = false;
     let initialSalt = null;
     let initialNotes = [];
@@ -579,17 +591,16 @@ export async function getServerSideProps(context) {
         initialSalt = user.encryptionSalt;
 
         // Fetch *encrypted* notes
-        const encryptedNotes = await Note.find({ userId }).sort({ updatedAt: -1 }).select('-content'); // Fetch without content
+        // const encryptedNotes = await Note.find({ userId }).sort({ updatedAt: -1 }).select('-content'); // Заменяем на:
+          const encryptedNotes = await db.collection('notes').find({ userId: new ObjectId(userId) }).sort({ updatedAt: -1 }).project({ content: 0 }).toArray();
         initialNotes = encryptedNotes.map(note => ({
             _id: note._id.toString(), // Convert ObjectId to string
             title: note.title,
-            updatedAt: note.updatedAt.toISOString(),
+            updatedAt: note.updatedAt.toISOString(), // timestamps
             tags: note.tags,
             content: note.content // Keep encrypted content
         }));
-
     }
-
     return {
         props: {
             initialNotes: JSON.parse(JSON.stringify(initialNotes)),
@@ -598,4 +609,16 @@ export async function getServerSideProps(context) {
 
         },
     };
+  }
+  catch(error){
+      console.error("Failed to fetch data:", error);
+      return {
+        props: {
+          initialNotes: [],
+          hasSetupKey: false,
+          initialSalt: null,
+          error: "Failed to connect to the database", // Передаем сообщение об ошибке
+        },
+      };
+  }
 }
