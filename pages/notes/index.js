@@ -1,4 +1,3 @@
-// --- /pages/notes/index.js ---
 import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
@@ -18,27 +17,35 @@ export default function Notes() {
   const [masterPassword, setMasterPassword] = useState('');
   const [hasSetupKey, setHasSetupKey] = useState(false);
 
-  // Проверка аутентификации
+  // Проверка аутентификации и перенаправление, если пользователь не аутентифицирован
   useEffect(() => {
-    if (status !== 'loading' && !session) {
+    if (status === 'unauthenticated') {
       router.push('/');
     }
-  }, [session, status, router]);
+  }, [status, router]);
 
   // Загрузка заметок
   const fetchNotes = useCallback(async () => {
-    if (!session || !encryptionKey) return;
+    if (!session || !encryptionKey) {
+      setLoading(false); // Stop loading if no session or key
+      return;
+    }
 
     try {
       const response = await fetch('/api/notes');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const data = await response.json();
       setNotes(data);
-      setLoading(false);
     } catch (error) {
       console.error('Failed to fetch notes:', error);
+      alert('Не удалось загрузить заметки.  Пожалуйста, обновите страницу.');
+    } finally {
       setLoading(false);
     }
   }, [session, encryptionKey]);
+
 
   // Загрузка заметок при изменении ключа шифрования
   useEffect(() => {
@@ -56,6 +63,11 @@ export default function Notes() {
       return;
     }
 
+    if (!session) { // Check for session before using session.user
+        alert('Сессия не найдена. Пожалуйста, войдите снова.');
+        return;
+    }
+
     try {
       // Используем email пользователя как соль для ключа
       const salt = session.user.email;
@@ -66,7 +78,6 @@ export default function Notes() {
       setHasSetupKey(true);
 
       // Сохраняем признак того, что пользователь настроил ключ в sessionStorage
-      // (сам ключ не сохраняем нигде постоянно для безопасности)
       sessionStorage.setItem('hasSetupKey', 'true');
     } catch (error) {
       console.error('Failed to setup encryption key:', error);
@@ -89,7 +100,7 @@ export default function Notes() {
   };
 
   // Выбор и просмотр заметки
-  const selectNote = async (note) => {
+  const selectNote = (note) => {
     setSelectedNote(note);
     setIsEditing(false);
   };
@@ -99,14 +110,18 @@ export default function Notes() {
     setIsEditing(true);
   };
 
-  // Получение полной заметки с зашифрованным содержимым
+  // Получение полной заметки (зашифрованного содержимого)
   const fetchFullNote = async (noteId) => {
     try {
       const response = await fetch(`/api/notes/${noteId}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const note = await response.json();
       return note;
     } catch (error) {
-      console.error('Failed to fetch note:', error);
+      console.error('Failed to fetch full note:', error);
+      alert('Не удалось загрузить полное содержимое заметки.');
       return null;
     }
   };
@@ -114,41 +129,34 @@ export default function Notes() {
   // Сохранение заметки
   const saveNote = async (noteData) => {
     try {
-      if (noteData._id) {
-        // Обновление существующей заметки
-        const response = await fetch(`/api/notes/${noteData._id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(noteData),
-        });
+      const url = noteData._id ? `/api/notes/${noteData._id}` : '/api/notes';
+      const method = noteData._id ? 'PUT' : 'POST';
 
-        if (response.ok) {
-          // Обновляем локальный список заметок
-          setNotes(notes.map(note =>
-            note._id === noteData._id ? { ...note, title: noteData.title } : note
-          ));
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(noteData),
+      });
 
-          setSelectedNote({ ...noteData, content: null }); // Update selectedNote after saving
-          setIsEditing(false);
-        }
-      } else {
-        // Создание новой заметки
-        const response = await fetch('/api/notes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(noteData),
-        });
-
-        if (response.ok) {
-          const newNote = await response.json();
-          setNotes([{ ...newNote, content: null }, ...notes]);
-          setSelectedNote({ ...newNote, content: null }); // And here
-          setIsEditing(false);
-        }
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+
+      const updatedNote = await response.json();
+
+      if (method === 'PUT') {
+        setNotes(prevNotes =>
+          prevNotes.map(note => (note._id === updatedNote._id ? { ...note, title: updatedNote.title } : note))
+        );
+      } else {
+        setNotes(prevNotes => [{ ...updatedNote, content: null }, ...prevNotes]);
+      }
+      setSelectedNote({ ...updatedNote, content: null }); // Clear content after saving
+      setIsEditing(false);
+
     } catch (error) {
       console.error('Failed to save note:', error);
-      alert('Не удалось сохранить заметку');
+      alert(`Не удалось сохранить заметку: ${error.message}`);
     }
   };
 
@@ -163,17 +171,18 @@ export default function Notes() {
         method: 'DELETE',
       });
 
-      if (response.ok) {
-        setNotes(notes.filter(note => note._id !== noteId));
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-        if (selectedNote && selectedNote._id === noteId) {
-          setSelectedNote(null);
-          setIsEditing(false);
-        }
+      setNotes(prevNotes => prevNotes.filter(note => note._id !== noteId));
+      if (selectedNote && selectedNote._id === noteId) {
+        setSelectedNote(null);
+        setIsEditing(false);
       }
     } catch (error) {
       console.error('Failed to delete note:', error);
-      alert('Не удалось удалить заметку');
+      alert(`Не удалось удалить заметку: ${error.message}`);
     }
   };
 
@@ -182,55 +191,55 @@ export default function Notes() {
     const file = e.target.files[0];
     if (!file) return;
 
-    try {
-      const reader = new FileReader();
+    const reader = new FileReader();
 
-      reader.onload = async (event) => {
-        try {
-          const importData = JSON.parse(event.target.result);
+    reader.onload = async (event) => {
+      try {
+        const importData = JSON.parse(event.target.result);
 
-          if (!importData.notes || !Array.isArray(importData.notes)) {
-            throw new Error('Invalid import format');
-          }
-
-          const response = await fetch('/api/notes/import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ notes: importData.notes }),
-          });
-
-          if (response.ok) {
-            alert('Заметки успешно импортированы');
-            fetchNotes();
-          } else {
-            const error = await response.json();
-            throw new Error(error.message);
-          }
-        } catch (error) {
-          console.error('Failed to import notes:', error);
-          alert(`Ошибка импорта: ${error.message}`);
+        if (!importData.notes || !Array.isArray(importData.notes)) {
+          throw new Error('Invalid import format');
         }
-      };
 
-      reader.readAsText(file);
-    } catch (error) {
-      console.error('Failed to read import file:', error);
-      alert('Не удалось прочитать файл импорта');
-    }
+        const response = await fetch('/api/notes/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes: importData.notes }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to import notes');
+        }
+
+        alert('Заметки успешно импортированы');
+        fetchNotes(); // Reload notes after successful import
+      } catch (error) {
+        console.error('Failed to import notes:', error);
+        alert(`Ошибка импорта: ${error.message}`);
+      }
+    };
+
+    reader.onerror = () => {
+      alert('Не удалось прочитать файл.');
+    };
+
+    reader.readAsText(file);
   };
 
   // Экспорт заметок
   const exportNotes = async () => {
     try {
       const response = await fetch('/api/notes/export');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const exportData = await response.json();
 
-      // Создаем файл для скачивания
       const dataStr = JSON.stringify(exportData, null, 2);
       const dataBlob = new Blob([dataStr], { type: 'application/json' });
       const dataUrl = URL.createObjectURL(dataBlob);
 
-      // Создаем временную ссылку для скачивания файла
       const downloadLink = document.createElement('a');
       downloadLink.href = dataUrl;
       downloadLink.download = `secure-notes-export-${new Date().toISOString().slice(0, 10)}.json`;
@@ -239,181 +248,145 @@ export default function Notes() {
       document.body.removeChild(downloadLink);
     } catch (error) {
       console.error('Failed to export notes:', error);
-      alert('Не удалось экспортировать заметки');
+      alert('Не удалось экспортировать заметки.');
     }
   };
-    // Corrected SVG paths in multiple places below:
+
 
   if (status === 'loading') {
     return <div className="flex justify-center items-center h-screen">Loading...</div>;
   }
 
+
   if (!session) {
-    return null; // Редирект обрабатывается в useEffect
+    return null; // Redirect handled in useEffect
   }
 
-  // Страница для установки мастер-пароля
+  // Страница установки мастер-пароля
   if (!hasSetupKey) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="max-w-md w-full p-6 bg-white rounded-lg shadow-md">
           <h1 className="text-xl font-bold mb-4 text-center">Установите мастер-пароль</h1>
           <p className="mb-4 text-gray-600 text-sm">
-            Этот пароль будет использоваться для шифрования ваших заметок.
-            Пароль не сохраняется нигде, поэтому важно его запомнить.
+            Этот пароль будет использоваться для шифрования ваших заметок.  Он не сохраняется, поэтому важно его запомнить.
           </p>
-
           <form onSubmit={setupEncryptionKey} className="space-y-4">
             <div>
               <input
                 type="password"
-                placeholder="Введите мастер-пароль (минимум 8 символов)"
+                placeholder="Мастер-пароль (мин. 8 символов)"
                 value={masterPassword}
                 onChange={(e) => setMasterPassword(e.target.value)}
-                className="w-full p-2 border rounded focus:ring focus:ring-blue-300"
-                minLength={8}
+                className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
+                minLength="8"
               />
             </div>
-            <div>
-              <button
-                type="submit"
-                className="w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-              >
-                Продолжить
-              </button>
-            </div>
+            <button
+              type="submit"
+              className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              Установить пароль
+            </button>
           </form>
         </div>
       </div>
     );
   }
 
+  // Основной интерфейс заметок
   return (
     <div className="min-h-screen bg-gray-50">
       <Head>
         <title>Secure Notes</title>
         <meta name="description" content="Secure personal notes application" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="/favicon.ico" />
       </Head>
 
       <div className="container mx-auto px-4 py-8 md:flex md:space-x-4">
-        {/* Боковая панель со списком заметок */}
-        <div className="md:w-1/3 lg:w-1/4 mb-4 md:mb-0">
-          <div className="bg-white p-4 rounded-lg shadow-md">
-            <div className="flex justify-between items-center mb-4">
-              <h1 className="text-xl font-bold">Мои заметки</h1>
+        {/* Sidebar */}
+        <div className="md:w-1/4 mb-8 md:mb-0">
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h1 className="text-xl font-bold">Заметки</h1>
               <button
                 onClick={createNewNote}
-                className="p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600"
+                className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 title="Новая заметка"
               >
-                {/* Corrected SVG */}
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-6 h-6">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                 </svg>
-
               </button>
             </div>
 
-            {/* Управление импортом/экспортом */}
+            {/* Import/Export Buttons */}
             <div className="flex justify-between mb-4">
               <label className="flex items-center justify-center px-3 py-1 bg-gray-100 rounded cursor-pointer hover:bg-gray-200 text-sm">
-                {/* Corrected SVG */}
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-4 h-4 mr-1">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
                 </svg>
-
-                Импорт
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={importNotes}
-                  className="hidden"
-                />
+                <span>Импорт</span>
+                <input type="file" accept=".json" onChange={importNotes} className="hidden" />
               </label>
 
-              <button
-                onClick={exportNotes}
-                className="flex items-center px-3 py-1 bg-gray-100 rounded hover:bg-gray-200 text-sm"
-              >
-                {/* Corrected SVG */}
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-4 h-4 mr-1">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 01-.923 1.785A5.969 5.969 0 006 21c1.282 0 2.47-.402 3.445-1.087.81.22 1.668.337 2.555.337z" />
-                </svg>
-                Экспорт
+              <button onClick={exportNotes} className="flex items-center px-3 py-1 bg-gray-100 rounded hover:bg-gray-200 text-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-4 h-4 mr-1">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 01-.923 1.785A5.969 5.969 0 006 21c1.282 0 2.47-.402 3.445-1.087.81.22 1.668.337 2.555.337z" />
+              </svg>
+                <span>Экспорт</span>
               </button>
             </div>
 
-            {/* Список заметок */}
+            {/* Note List */}
             {loading ? (
               <div className="text-center py-4">Загрузка...</div>
             ) : notes.length === 0 ? (
               <div className="text-center py-4 text-gray-500">Нет заметок</div>
             ) : (
-              <div className="space-y-2 max-h-[70vh] overflow-y-auto">
-                {notes.map(note => (
-                  <div
-                    key={note._id}
-                    className={`p-3 rounded cursor-pointer hover:bg-gray-100 ${
-                      selectedNote && selectedNote._id === note._id ? 'bg-blue-100' : ''
-                    }`}
-                    onClick={() => selectNote(note)}
-                  >
-                    <h3 className="font-medium truncate">{note.title || 'Без заголовка'}</h3>
-                    <p className="text-xs text-gray-500">
-                      {new Date(note.updatedAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                ))}
-              </div>
+              <NoteList notes={notes} onSelect={selectNote} onDelete={deleteNote} />
             )}
           </div>
         </div>
 
-        {/* Основная область просмотра/редактирования */}
-        <div className="md:w-2/3 lg:w-3/4">
-          <div className="bg-white p-4 rounded-lg shadow-md min-h-[70vh]">
+        {/* Main Content Area */}
+        <div className="md:w-3/4">
+          <div className="bg-white rounded-lg shadow p-4 min-h-[70vh]">
             {selectedNote && !isEditing ? (
+              // Note View
               <div>
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-bold">{selectedNote.title || 'Без заголовка'}</h2>
                   <div className="flex space-x-2">
                     <button
                       onClick={editNote}
-                      className="p-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                      className="bg-blue-500 hover:bg-blue-600 text-white rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       title="Редактировать"
                     >
-                      {/* Corrected SVG */}
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-6 h-6">
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-6 h-6">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" />
                       </svg>
                     </button>
                     <button
                       onClick={() => deleteNote(selectedNote._id)}
-                      className="p-2 bg-red-500 text-white rounded hover:bg-red-600"
+                      className="bg-red-500 hover:bg-red-600 text-white rounded p-2 focus:outline-none focus:ring-2 focus:ring-red-500"
                       title="Удалить"
                     >
-                      {/* Corrected SVG */}
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-6 h-6">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                       </svg>
                     </button>
                   </div>
                 </div>
-
-                <div className="mb-4">
-                  <p className="text-sm text-gray-500">
-                    Последнее обновление: {new Date(selectedNote.updatedAt).toLocaleString()}
-                  </p>
-                </div>
-
+                <p className="text-sm text-gray-500 mb-4">
+                  Последнее обновление: {new Date(selectedNote.updatedAt).toLocaleString()}
+                </p>
                 {selectedNote.content ? (
-                  <div className="prose max-w-none">
-                    {/* Content will be decrypted and displayed by NoteEditor during edit */}
-                    {/* Decrypt and display content here only for viewing */}
-                    {decrypt(selectedNote.content, encryptionKey)}
+                  <div className="prose">
+                      {decrypt(selectedNote.content, encryptionKey)}
                   </div>
+
                 ) : (
                   <div className="text-center py-4">
                     <p>Загрузка содержимого...</p>
@@ -421,33 +394,31 @@ export default function Notes() {
                       onClick={async () => {
                         const fullNote = await fetchFullNote(selectedNote._id);
                         if (fullNote) {
-                          setSelectedNote(fullNote); // Update with full content
+                          setSelectedNote(fullNote);
                         }
                       }}
-                      className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                      className="bg-blue-500 hover:bg-blue-600 text-white rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                       Загрузить
                     </button>
                   </div>
                 )}
-
+                {/* Display Tags */}
                 {selectedNote.tags && selectedNote.tags.length > 0 && (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {selectedNote.tags.map(tag => (
-                      <span
-                        key={tag}
-                        className="px-2 py-1 bg-gray-100 rounded-full text-xs"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                        {selectedNote.tags.map((tag) => (
+                            <span key={tag} className="bg-gray-200 rounded-full px-3 py-1 text-xs font-semibold text-gray-700">
+                                {tag}
+                            </span>
+                        ))}
+                    </div>
                 )}
               </div>
             ) : isEditing ? (
+              // Note Editor
               <div>
                 <h2 className="text-xl font-bold mb-4">
-                  {selectedNote ? 'Редактирование заметки' : 'Новая заметка'}
+                  {selectedNote ? 'Редактировать заметку' : 'Новая заметка'}
                 </h2>
                 <NoteEditor
                   note={selectedNote}
@@ -456,25 +427,26 @@ export default function Notes() {
                   onCancel={() => {
                     setIsEditing(false);
                     if (!selectedNote) {
-                      setSelectedNote(null); // Reset if creating a new note and cancel
+                      setSelectedNote(null);
                     }
                   }}
                 />
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center h-[60vh] text-gray-500">
-                {/* Corrected SVG */}
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-16 h-16 mb-4">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-
-                <p>Выберите заметку или создайте новую</p>
-                <button
-                  onClick={createNewNote}
-                  className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                >
-                  Создать заметку
-                </button>
+              // Default View (No Note Selected)
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-16 h-16 text-gray-400 mb-4 mx-auto">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  <p className="text-gray-600">Выберите заметку или создайте новую</p>
+                  <button
+                    onClick={createNewNote}
+                    className="bg-blue-500 hover:bg-blue-600 text-white rounded p-2 mt-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    Создать заметку
+                  </button>
+                </div>
               </div>
             )}
           </div>
