@@ -1,14 +1,14 @@
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react'; // Import useState
+import { useEffect, useState } from 'react';
 import Head from 'next/head';
+import { getServerSideProps } from '../lib/auth'; // We'll create this
 
-export default function Home() {
-  const { data: session, status } = useSession();
+export default function Home({ session }) {
+  const { data: clientSession, status } = useSession();
   const router = useRouter();
-  const [isMounted, setIsMounted] = useState(false); // Add isMounted state
+  const [isMounted, setIsMounted] = useState(false);
 
-  // Prevent any rendering until mounted
   useEffect(() => {
     setIsMounted(true);
   }, []);
@@ -17,10 +17,12 @@ export default function Home() {
     if (isMounted && status === 'authenticated') {
       router.push('/notes');
     }
-  }, [isMounted, status, router]); // Include isMounted in dependencies
+  }, [isMounted, status, router]);
 
+  // Use client-side session data when available, fallback to server-side
+  const activeSession = clientSession || session;
 
-  if (!isMounted || status === 'loading') {
+  if (!isMounted) {
     return <div className="min-h-screen flex items-center justify-center bg-gray-50">Loading...</div>;
   }
 
@@ -37,7 +39,7 @@ export default function Home() {
 
         {status === 'authenticated' ? (
           <div className="space-y-4">
-            <p className="text-center">Logged in as {session.user.email}</p>
+            <p className="text-center">Logged in as {activeSession.user.email}</p>
             <div className="flex justify-center">
               <button
                 onClick={() => router.push('/notes')}
@@ -90,3 +92,6 @@ export default function Home() {
     </div>
   );
 }
+
+// Export the getServerSideProps function
+export { getServerSideProps }
