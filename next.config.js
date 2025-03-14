@@ -7,9 +7,6 @@ const nextConfig = {
     // Only enable necessary experimental features
   },
   // Add any other configuration here
-  
-  // Specify which pages to disable automatic static generation for
-  unstable_runtimeJS: true,
 }
 
 module.exports = nextConfig
