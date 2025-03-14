@@ -1,7 +1,7 @@
 // --- pages/api/user/get-encryption-salt.js ---
 import { getSession } from 'next-auth/react';
-import dbConnect from '../../../lib/mongodb';
-import User from '../../../models/User';
+import clientPromise from '../../../lib/mongodb'; // Импортируем clientPromise
+import { ObjectId } from 'mongodb';
 
 export default async function handler(req, res) {
     const session = await getSession({ req });
@@ -10,12 +10,15 @@ export default async function handler(req, res) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    await dbConnect();
+    // await dbConnect();  //  dbConnect больше нет!
 
     if (req.method === 'GET') {
         try {
             const userId = session.user.id;
-            const user = await User.findById(userId);
+            const client = await clientPromise; // Получаем клиент
+            const db = client.db(); // Получаем базу данных (имя базы данных по умолчанию из строки подключения)
+            // const db = client.db("your-database-name"); // Или явно укажи имя базы данных
+            const user = await db.collection('users').findOne({ _id: new ObjectId(userId) }); // Ищем пользователя
 
             if (user && user.encryptionSalt) {
                 return res.status(200).json({ salt: user.encryptionSalt });
