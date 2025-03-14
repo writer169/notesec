@@ -1,10 +1,9 @@
-// --- /pages/api/auth/[...nextauth].js ---
 import NextAuth from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
 import { MongoDBAdapter } from "@next-auth/mongodb-adapter";
 import clientPromise from '../../../lib/mongodb';
 
-export const authOptions = { //  <--- ДОБАВЬ ЭТУ СТРОКУ
+export const authOptions = {
   adapter: MongoDBAdapter(clientPromise),
   providers: [
     GoogleProvider({
@@ -14,12 +13,15 @@ export const authOptions = { //  <--- ДОБАВЬ ЭТУ СТРОКУ
   ],
   secret: process.env.NEXTAUTH_SECRET,
   session: {
-    strategy: 'jwt',
+    strategy: 'database', // Изменено с 'jwt' на 'database'
     maxAge: 30 * 24 * 60 * 60, // 30 дней
   },
   callbacks: {
-    async session({ session, token }) {
-      session.user.id = token.sub;
+    async session({ session, token, user }) {
+      // Если используется database стратегия, token будет undefined, но user будет доступен
+      if (user) {
+        session.user.id = user.id;
+      }
       return session;
     },
     async jwt({ token, user }) {
@@ -33,6 +35,7 @@ export const authOptions = { //  <--- ДОБАВЬ ЭТУ СТРОКУ
     signIn: '/',
     error: '/',
   },
+  debug: process.env.NODE_ENV === 'development', // Добавлено для отладки
 };
 
-export default NextAuth(authOptions); // Оставь эту строку как есть
+export default NextAuth(authOptions);
