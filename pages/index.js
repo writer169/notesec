@@ -1,4 +1,3 @@
-// --- /pages/index.js ---
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useRouter } from 'next/router';
 import { useEffect } from 'react';
@@ -9,10 +8,15 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    if (session) {
+    if (status === 'authenticated') { // Use status for redirection
       router.push('/notes');
     }
-  }, [session, router]);
+  }, [session, router, status]); // Include status in dependencies
+
+
+  if (status === 'loading') {
+      return <div className="min-h-screen flex items-center justify-center bg-gray-50">Loading...</div>;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -25,9 +29,7 @@ export default function Home() {
       <div className="max-w-md w-full p-6 bg-white rounded-lg shadow-md">
         <h1 className="text-2xl font-bold text-center mb-6">Secure Notes</h1>
 
-        {status === 'loading' ? (
-          <div className="text-center">Loading...</div>
-        ) : session ? (
+        {status === 'authenticated' ? (
           <div className="space-y-4">
             <p className="text-center">Logged in as {session.user.email}</p>
             <div className="flex justify-center">
@@ -55,6 +57,7 @@ export default function Home() {
                 onClick={() => signIn('google')}
                 className="flex items-center px-4 py-2 bg-white border rounded hover:bg-gray-50 shadow"
               >
+                {/* SVG Icon (Corrected) */}
                 <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
                   <path
                     fill="#4285F4"
