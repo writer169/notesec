@@ -1,10 +1,9 @@
-// --- /pages/api/user/set-encryption-settings.js ---
+// pages/api/user/setup-encryption-key.js
 import { getSession } from 'next-auth/react';
-// import dbConnect from '../../../lib/mongodb'; // Больше не нужно
-// import User from '../../../models/User'; // Больше не нужно
+import { deriveKey } from '../../../lib/encryption';
 import clientPromise from '../../../lib/mongodb';
-import {ObjectId} from 'mongodb';
-
+import crypto from 'crypto'; // crypto здесь доступен
+import { ObjectId } from 'mongodb';
 
 export default async function handler(req, res) {
   const session = await getSession({ req });
@@ -13,37 +12,33 @@ export default async function handler(req, res) {
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
-  // await dbConnect(); // Больше не нужно
-
   if (req.method === 'POST') {
-    const { salt } = req.body;
+    const { masterPassword } = req.body;
 
-    if (!salt) {
-      return res.status(400).json({ message: 'Salt is required' });
+    if (!masterPassword || masterPassword.length < 8) {
+      return res.status(400).json({ message: 'Master password must be at least 8 characters long.' });
     }
 
     try {
-      const userId = session.user.id;
-        const client = await clientPromise;
-        const db = client.db();
-      // Обновляем пользователя, добавляя/заменяя encryptionSalt
-      // await User.findByIdAndUpdate(userId, { encryptionSalt: salt }, { new: true, upsert: true }); // Заменяем на:
-        const result = await db.collection('users').updateOne(
-            { _id: new ObjectId(userId) },
-            { $set: { encryptionSalt: salt } },
-            { upsert: true } // Создать документ, если он не существует
-        );
+      const salt = crypto.randomBytes(16).toString('hex'); // Генерируем соль *на сервере*
+      const encryptionKey = deriveKey(masterPassword, Buffer.from(salt, 'hex'));
 
-        if (result.acknowledged) { // Проверяем результат операции
-           return res.status(200).json({ message: 'Encryption settings saved' });
-        }
-        else{
-            throw new Error("Failed to update user");
-        }
+      const client = await clientPromise;
+      const db = client.db();
+      const userId = session.user.id;
+
+      await db.collection('users').updateOne(
+        { _id: new ObjectId(userId) },
+        { $set: { encryptionSalt: salt } },
+        { upsert: true }
+      );
+
+      // *Не* возвращаем ключ шифрования клиенту!
+      return res.status(200).json({ success: true }); // Возвращаем только успех
 
     } catch (error) {
-      console.error("Error saving encryption settings:", error);
-      return res.status(500).json({ message: error.message || 'Failed to save encryption settings' });
+      console.error('Failed to setup encryption key:', error);
+      return res.status(500).json({ message: error.message || 'Failed to set up encryption key.' });
     }
   }
 
